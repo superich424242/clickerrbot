@@ -249,6 +249,32 @@ async def handle_reset(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+
+# ========== СКРЫТАЯ КОМАНДА /cheat (только для тебя) ==========
+@dp.message(Command("cheat"))
+async def cheat_command(message: types.Message):
+    YOUR_USER_ID = 8594910882 # ⬅️ ЗАМЕНИ НА СВОЙ ID (число)
+
+    if message.from_user.id != YOUR_USER_ID:
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    args = message.text.split()
+    if len(args) > 1 and args[1].isdigit():
+        amount = int(args[1])
+    else:
+        amount = 1000
+
+    user = await get_user(message.from_user.id)
+    new_score = user["score"] + amount
+    await update_user(message.from_user.id, score=new_score)
+
+    await message.answer(
+        f"✅ Чит активирован! +{amount} монет.\n"
+        f"Теперь у тебя **{new_score}** монет.",
+        parse_mode="Markdown"
+    )
+    
 # ========== ФОНОВАЯ ЗАДАЧА ==========
 async def farm_loop():
     while True:
