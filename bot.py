@@ -2,18 +2,14 @@ import asyncio
 import logging
 import time
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.filters import Command, Text
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.exceptions import TelegramBadRequest
 import aiosqlite
 import os
 
 # ---------- КОНФИГУРАЦИЯ ----------
-BOT_TOKEN = "8981424648:AAFDSu9LVH9DQTKqDIsjQ_6zZquDwtaWjb0" # читаем из переменных окружения
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN не задан!")
-
+BOT_TOKEN = "8981424648:AAFDSu9LVH9DQTKqDIsjQ_6zZquDwtaWjb0"  # ⬅️ вставь свой токен
 DB_PATH = "clicker.db"
 
 logging.basicConfig(level=logging.INFO)
@@ -52,11 +48,7 @@ async def get_user(user_id: int):
                     "last_click_time": row[4],
                     "bought_multiplier": row[5],
                 }
-            # Новый пользователь
-            await db.execute(
-                "INSERT INTO users (user_id) VALUES (?)",
-                (user_id,)
-            )
+            await db.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
             await db.commit()
             return {
                 "score": 0,
@@ -70,40 +62,23 @@ async def get_user(user_id: int):
 async def update_user(user_id: int, **kwargs):
     async with aiosqlite.connect(DB_PATH) as db:
         for key, value in kwargs.items():
-            await db.execute(
-                f"UPDATE users SET {key} = ? WHERE user_id = ?",
-                (value, user_id)
-            )
+            await db.execute(f"UPDATE users SET {key} = ? WHERE user_id = ?", (value, user_id))
         await db.commit()
 
 async def get_top_users(limit=10):
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT user_id, score FROM users ORDER BY score DESC LIMIT ?",
-            (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return rows
+        async with db.execute("SELECT user_id, score FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
+            return await cursor.fetchall()
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def get_auto_multiplier(total_clicks: int) -> int:
-    if total_clicks >= 10000:
-        return 10
-    elif total_clicks >= 5000:
-        return 5
-    elif total_clicks >= 1000:
-        return 2
-    else:
-        return 1
+    if total_clicks >= 10000: return 10
+    if total_clicks >= 5000: return 5
+    if total_clicks >= 1000: return 2
+    return 1
 
 def get_status_name(multiplier: int) -> str:
-    map_status = {
-        10: "👑 ULTRA (x10)",
-        5: "⭐ GOLD (x5)",
-        2: "💎 PREMIUM (x2)",
-        1: "🟢 Обычный (x1)",
-    }
-    return map_status.get(multiplier, "🟢 Обычный (x1)")
+    return {10: "👑 ULTRA (x10)", 5: "⭐ GOLD (x5)", 2: "💎 PREMIUM (x2)", 1: "🟢 Обычный (x1)"}.get(multiplier, "🟢 Обычный (x1)")
 
 def get_farm_price(level: int) -> int:
     return 200 + 50 * level
@@ -111,133 +86,92 @@ def get_farm_price(level: int) -> int:
 def get_next_status_info(user: dict) -> str:
     bought = user["bought_multiplier"]
     clicks = user["total_clicks"]
-    if bought < 2:
-        return "Купите PREMIUM (x2) за 1000 монет"
-    if bought < 5:
-        return "Купите GOLD (x5) за 5000 монет"
-    if bought < 10:
-        return "Купите ULTRA (x10) за 10000 монет"
-    if clicks < 10000:
-        return f"До автоматического ULTRA: {10000 - clicks} кликов"
+    if bought < 2: return "Купите PREMIUM (x2) за 1000 монет"
+    if bought < 5: return "Купите GOLD (x5) за 5000 монет"
+    if bought < 10: return "Купите ULTRA (x10) за 10000 монет"
+    if clicks < 10000: return f"До автоматического ULTRA: {10000 - clicks} кликов"
     return "🎉 Все статусы получены!"
 
 def format_stats(user: dict) -> str:
-    auto = get_auto_multiplier(user["total_clicks"])
-    bought = user["bought_multiplier"]
-    final_mult = max(auto, bought)
-    status = get_status_name(final_mult)
-    farm_price = get_farm_price(user["farm_level"])
-    next_info = get_next_status_info(user)
+    final_mult = max(get_auto_multiplier(user["total_clicks"]), user["bought_multiplier"])
     return (
         f"💰 Монет: **{user['score']}**\n"
         f"🐣 Всего кликов: **{user['total_clicks']}**\n"
         f"💪 Сила клика: **{user['click_power']}** × {final_mult} = **{user['click_power'] * final_mult}**\n"
         f"🚜 Уровень фермы: **{user['farm_level']}** (доход: {user['farm_level']} монет/сек)\n"
-        f"🏅 Текущий статус: {status}\n"
-        f"📈 {next_info}\n"
+        f"🏅 Текущий статус: {get_status_name(final_mult)}\n"
+        f"📈 {get_next_status_info(user)}\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"Цена следующей фермы: **{farm_price}** монет"
+        f"Цена следующей фермы: **{get_farm_price(user['farm_level'])}** монет"
     )
 
-# ---------- КЛАВИАТУРЫ ----------
-def get_main_keyboard(user: dict) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🐣 КЛИК (1 сек)", callback_data="click"))
-    farm_price = get_farm_price(user["farm_level"])
-    builder.row(
-        InlineKeyboardButton(
-            text=f"🚜 Купить ферму (ур. {user['farm_level']}) — {farm_price} монет",
-            callback_data="buy_farm"
-        )
+# ---------- КЛАВИАТУРА (reply) ----------
+def get_main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🐣 КЛИК (1 сек)")],
+            [KeyboardButton(text="🚜 Купить ферму")],
+            [KeyboardButton(text="🏪 Магазин статусов")],
+            [KeyboardButton(text="📊 Топ 10")],
+            [KeyboardButton(text="🔄 Сброс")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
     )
-    builder.row(InlineKeyboardButton(text="🏪 Магазин статусов", callback_data="shop"))
-    builder.row(InlineKeyboardButton(text="📊 Топ 10", callback_data="top"))
-    builder.row(InlineKeyboardButton(text="🔄 Сброс", callback_data="reset"))
-    return builder.as_markup()
-
-def get_shop_keyboard(user: dict) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    bought = user["bought_multiplier"]
-    if bought < 2:
-        builder.row(InlineKeyboardButton(text="💎 PREMIUM (x2) — 1000 монет", callback_data="buy_status_2"))
-    if bought < 5:
-        builder.row(InlineKeyboardButton(text="⭐ GOLD (x5) — 5000 монет", callback_data="buy_status_5"))
-    if bought < 10:
-        builder.row(InlineKeyboardButton(text="👑 ULTRA (x10) — 10000 монет", callback_data="buy_status_10"))
-    if bought >= 10:
-        builder.row(InlineKeyboardButton(text="✅ Все статусы куплены!", callback_data="noop"))
-    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main"))
-    return builder.as_markup()
 
 # ---------- ОБРАБОТЧИКИ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    user = await get_user(message.from_user.id)
+    await message.answer(
+        f"🐔 **Добро пожаловать в кликер!**\nКликай каждую секунду, зарабатывай монеты, покупай ферму и статусы!\n\n{format_stats(user)}",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
+
+# Обработчик текстовых сообщений (все кнопки)
+@dp.message(Text("🐣 КЛИК (1 сек)"))
+async def handle_click(message: types.Message):
     user_id = message.from_user.id
     user = await get_user(user_id)
-    text = f"🐔 **Добро пожаловать в кликер!**\nКликай каждую секунду, зарабатывай монеты, покупай ферму и статусы!\n\n{format_stats(user)}"
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user))
-
-@dp.callback_query(lambda c: c.data == "click")
-async def handle_click(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
-
     now = int(time.time())
     if now - user["last_click_time"] < 1:
-        await callback.answer("⏳ Подожди 1 секунду!", show_alert=True)
+        await message.answer("⏳ Подожди 1 секунду!")
         return
-
     await update_user(user_id, last_click_time=now)
-
-    auto = get_auto_multiplier(user["total_clicks"])
-    bought = user["bought_multiplier"]
-    final_mult = max(auto, bought)
+    final_mult = max(get_auto_multiplier(user["total_clicks"]), user["bought_multiplier"])
     gain = user["click_power"] * final_mult
     new_score = user["score"] + gain
     new_clicks = user["total_clicks"] + 1
-
     await update_user(user_id, score=new_score, total_clicks=new_clicks)
-    user = await get_user(user_id)  # обновляем данные
+    user = await get_user(user_id)
+    await message.answer(
+        f"✅ +{gain} монет!\n\n{format_stats(user)}",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
 
-    try:
-        await callback.message.edit_text(
-            format_stats(user),
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(user)
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer(f"+{gain} монет!")
-
-@dp.callback_query(lambda c: c.data == "buy_farm")
-async def handle_buy_farm(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
+@dp.message(Text("🚜 Купить ферму"))
+async def handle_buy_farm(message: types.Message):
+    user_id = message.from_user.id
     user = await get_user(user_id)
     price = get_farm_price(user["farm_level"])
-
     if user["score"] < price:
-        await callback.answer(f"❌ Нужно {price} монет!", show_alert=True)
+        await message.answer(f"❌ Нужно {price} монет!", reply_markup=get_main_keyboard())
         return
-
     new_score = user["score"] - price
     new_farm = user["farm_level"] + 1
     await update_user(user_id, score=new_score, farm_level=new_farm)
     user = await get_user(user_id)
+    await message.answer(
+        f"🚜 Ферма улучшена! +1 монета/сек\n\n{format_stats(user)}",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
 
-    try:
-        await callback.message.edit_text(
-            format_stats(user),
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(user)
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer("🚜 Ферма улучшена! +1 монета/сек")
-
-@dp.callback_query(lambda c: c.data == "shop")
-async def handle_shop(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
+@dp.message(Text("🏪 Магазин статусов"))
+async def handle_shop(message: types.Message):
+    user = await get_user(message.from_user.id)
     text = (
         "🏪 **Магазин статусов**\n\n"
         "Купите постоянный множитель к силе клика:\n"
@@ -245,66 +179,50 @@ async def handle_shop(callback: types.CallbackQuery):
         "• ⭐ GOLD (x5) — 5000 монет\n"
         "• 👑 ULTRA (x10) — 10000 монет\n\n"
         f"У вас сейчас: {user['bought_multiplier']}x\n"
-        f"Монет: {user['score']}"
+        f"Монет: {user['score']}\n\n"
+        "Напиши /buy_2, /buy_5 или /buy_10 для покупки."
     )
-    await callback.message.edit_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=get_shop_keyboard(user)
-    )
-    await callback.answer()
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
-@dp.callback_query(lambda c: c.data.startswith("buy_status_"))
-async def handle_buy_status(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
+# Покупка статусов через команды (можно и через кнопки, но проще так)
+@dp.message(Command("buy_2"))
+async def buy_status_2(message: types.Message):
+    await buy_status(message, 2)
+
+@dp.message(Command("buy_5"))
+async def buy_status_5(message: types.Message):
+    await buy_status(message, 5)
+
+@dp.message(Command("buy_10"))
+async def buy_status_10(message: types.Message):
+    await buy_status(message, 10)
+
+async def buy_status(message: types.Message, target_mult: int):
+    user_id = message.from_user.id
     user = await get_user(user_id)
-
-    target_mult = int(callback.data.split("_")[2])  # 2, 5, 10
     price_map = {2: 1000, 5: 5000, 10: 10000}
     price = price_map[target_mult]
-
     if user["bought_multiplier"] >= target_mult:
-        await callback.answer("У вас уже есть этот или более высокий статус!", show_alert=True)
+        await message.answer("❌ У вас уже есть этот или более высокий статус!", reply_markup=get_main_keyboard())
         return
     if user["score"] < price:
-        await callback.answer(f"❌ Нужно {price} монет!", show_alert=True)
+        await message.answer(f"❌ Нужно {price} монет!", reply_markup=get_main_keyboard())
         return
-
     new_score = user["score"] - price
     await update_user(user_id, score=new_score, bought_multiplier=target_mult)
     user = await get_user(user_id)
+    await message.answer(
+        f"✅ Статус {target_mult}x куплен!\n\n{format_stats(user)}",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
 
-    try:
-        await callback.message.edit_text(
-            format_stats(user),
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(user)
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer(f"✅ Статус {target_mult}x куплен!")
-
-@dp.callback_query(lambda c: c.data == "back_to_main")
-async def handle_back_to_main(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
-    try:
-        await callback.message.edit_text(
-            format_stats(user),
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(user)
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "top")
-async def handle_top(callback: types.CallbackQuery):
+@dp.message(Text("📊 Топ 10"))
+async def handle_top(message: types.Message):
     top = await get_top_users(10)
     if not top:
-        await callback.answer("Пока нет игроков.", show_alert=True)
+        await message.answer("Пока нет игроков.", reply_markup=get_main_keyboard())
         return
-
     text = "🏆 **Топ 10 игроков**\n\n"
     for i, (user_id, score) in enumerate(top, 1):
         try:
@@ -313,11 +231,11 @@ async def handle_top(callback: types.CallbackQuery):
         except:
             name = str(user_id)
         text += f"{i}. {name} — {score} 🪙\n"
-    await callback.answer(text, show_alert=True)
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
-@dp.callback_query(lambda c: c.data == "reset")
-async def handle_reset(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
+@dp.message(Text("🔄 Сброс"))
+async def handle_reset(message: types.Message):
+    user_id = message.from_user.id
     await update_user(
         user_id,
         score=0,
@@ -328,19 +246,11 @@ async def handle_reset(callback: types.CallbackQuery):
         bought_multiplier=1
     )
     user = await get_user(user_id)
-    try:
-        await callback.message.edit_text(
-            format_stats(user),
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(user)
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer("🔄 Прогресс сброшен!", show_alert=True)
-
-@dp.callback_query(lambda c: c.data == "noop")
-async def handle_noop(callback: types.CallbackQuery):
-    await callback.answer()
+    await message.answer(
+        f"🔄 Прогресс сброшен!\n\n{format_stats(user)}",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
 
 # ---------- ФОНОВАЯ ЗАДАЧА: ДОХОД С ФЕРМЫ ----------
 async def farm_loop():
@@ -348,9 +258,7 @@ async def farm_loop():
         await asyncio.sleep(1)
         try:
             async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute(
-                    "UPDATE users SET score = score + farm_level WHERE farm_level > 0"
-                )
+                await db.execute("UPDATE users SET score = score + farm_level WHERE farm_level > 0")
                 await db.commit()
         except Exception as e:
             logging.error(f"Ошибка фермы: {e}")
