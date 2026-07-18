@@ -10,7 +10,7 @@ import aiosqlite
 import os
 
 # ---------- КОНФИГУРАЦИЯ ----------
-BOT_TOKEN = 8981424648:AAFDSu9LVH9DQTKqDIsjQ_6zZquDwtaWjb0 # читаем из переменных окружения
+BOT_TOKEN = "8981424648:AAFDSu9LVH9DQTKqDIsjQ_6zZquDwtaWjb0" # читаем из переменных окружения
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
